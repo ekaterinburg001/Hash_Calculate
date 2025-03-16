@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>哈希计算器</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            resize: vertical;
+            min-height: 80px;
+        }
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: white;
+            font-size: 16px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .file-input {
+            width: 100%;
+            padding: 8px 0;
+            /* 隐藏原生文件输入控件 */
+            opacity: 0;
+            height: 0;
+            width: 0;
+            position: absolute;
+        }
+        .file-info {
+            margin-top: 5px;
+            font-size: 14px;
+            color: #666;
+        }
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+        /* 自定义文件上传按钮样式 */
+        .custom-file-upload {
+            display: inline-block;
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        .custom-file-upload:hover {
+            background-color: #45a049;
+        }
+    </style>
+    <!-- 引入CryptoJS库，用于Web Crypto API不支持的算法 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <!-- 引入专门的SHA3库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-sha3/0.8.0/sha3.min.js"></script>
+    <!-- 引入SM3库 -->
+    <script src="https://cdn.jsdelivr.net/npm/sm-crypto/dist/sm3.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>哈希计算器</h1>
+        <div class="form-group">
+            <label for="algorithm">选择哈希算法:</label>
+            <select id="algorithm">
+                <option value="SHA-256">SHA-256</option>
+                <option value="SHA-512">SHA-512</option>
+                <option value="SHA-1">SHA-1</option>
+                <option value="SHA-384">SHA-384</option>
+                <option value="MD5">MD5</option>
+                <option value="SHA3-256">SHA3-256</option>
+                <option value="SHA3-512">SHA3-512</option>
+                <option value="SM3">SM3</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="message">输入消息:</label>
+            <textarea id="message" placeholder="请在此输入要计算哈希值的文本"></textarea>
+        </div>
+        <div class="form-group">
+            <label for="file">或者上传文件:</label>
+            <input type="file" id="file" class="file-input">
+            <label for="file" class="custom-file-upload">选择文件</label>
+            <p class="file-info" id="file-info">未选择文件</p>
+        </div>
+        <div class="form-group">
+            <label for="hash">哈希值:</label>
+            <textarea id="hash" readonly></textarea>
+        </div>
+    </div>
+
+    <script>
+        // 获取DOM元素
+        const messageInput = document.getElementById('message');
+        const hashOutput = document.getElementById('hash');
+        const algorithmSelect = document.getElementById('algorithm');
+        const fileInput = document.getElementById('file');
+        const fileInfo = document.getElementById('file-info');
+        
+        let currentFile = null;
+
+        // 文件选择处理
+        fileInput.addEventListener('change', function(e) {
+            if (this.files && this.files[0]) {
+                currentFile = this.files[0];
+                fileInfo.textContent = `已选择: ${currentFile.name} (${formatFileSize(currentFile.size)})`;
+                messageInput.value = '';  // 清空文本输入
+                updateHashFromFile();
+            } else {
+                currentFile = null;
+                fileInfo.textContent = '未选择文件';
+            }
+        });
+
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' bytes';
+            else if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+            else if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
+            else return (bytes / 1073741824).toFixed(2) + ' GB';
+        }
+
+        // 从文件计算哈希值
+        async function calculateFileHash(file, algorithm) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                
+                reader.onload = async function(e) {
+                    try {
+                        const fileContent = e.target.result;
+                        
+                        // Web Crypto API支持的算法
+                        const webCryptoAlgorithms = ['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'];
+                        
+                        if (webCryptoAlgorithms.includes(algorithm)) {
+                            // 使用Web Crypto API
+                            const hashBuffer = await crypto.subtle.digest(algorithm, fileContent);
+                            
+                            // 将哈希值转换为十六进制字符串
+                            const hashArray = Array.from(new Uint8Array(hashBuffer));
+                            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                            resolve(hashHex);
+                        } else {
+                            // 使用CryptoJS库和js-sha3库
+                            let hash;
+                            const wordArray = CryptoJS.lib.WordArray.create(fileContent);
+                            
+                            switch (algorithm) {
+                                case 'MD5':
+                                    hash = CryptoJS.MD5(wordArray);
+                                    resolve(hash.toString(CryptoJS.enc.Hex));
+                                    break;
+                                case 'SHA3-256':
+                                    // 使用js-sha3库计算SHA3-256
+                                    try {
+                                        // 确保文件内容是Uint8Array格式
+                                        const fileArray = new Uint8Array(fileContent);
+                                        // 直接使用sha3_256函数计算哈希值
+                                        const result = sha3_256(fileArray);
+                                        resolve(result);
+                                    } catch (e) {
+                                        console.error('SHA3-256计算错误:', e);
+                                        reject(e);
+                                    }
+                                    break;
+                                case 'SHA3-512':
+                                    // 使用js-sha3库计算SHA3-512
+                                    try {
+                                        // 确保文件内容是Uint8Array格式
+                                        const fileArray = new Uint8Array(fileContent);
+                                        // 直接使用sha3_512函数计算哈希值
+                                        const result = sha3_512(fileArray);
+                                        resolve(result);
+                                    } catch (e) {
+                                        console.error('SHA3-512计算错误:', e);
+                                        reject(e);
+                                    }
+                                    break;
+                                case 'SM3':
+                                    // 使用SM3库计算哈希值
+                                    try {
+                                        // 将ArrayBuffer转换为Uint8Array
+                                        const fileArray = new Uint8Array(fileContent);
+                                        // 将Uint8Array转换为十六进制字符串
+                                        let hexString = '';
+                                        for (let i = 0; i < fileArray.length; i++) {
+                                            hexString += fileArray[i].toString(16).padStart(2, '0');
+                                        }
+                                        // 使用sm-crypto库计算SM3哈希值
+                                        const result = sm3(hexString);
+                                        resolve(result);
+                                    } catch (e) {
+                                        console.error('SM3计算错误:', e);
+                                        reject(e);
+                                    }
+                                    break;
+                                default:
+                                    resolve('不支持的算法');
+                            }
+                        }
+                    } catch (error) {
+                        console.error('计算文件哈希值时出错:', error);
+                        reject(error);
+                    }
+                };
+                
+                reader.onerror = function() {
+                    reject(new Error('读取文件时出错'));
+                };
+                
+                // 读取文件为ArrayBuffer
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // 计算哈希值的函数 (文本输入)
+        async function calculateHash(message, algorithm) {
+            if (!message) {
+                return '';
+            }
+
+            // Web Crypto API支持的算法
+            const webCryptoAlgorithms = ['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'];
+            
+            try {
+                if (webCryptoAlgorithms.includes(algorithm)) {
+                    // 使用Web Crypto API
+                    const encoder = new TextEncoder();
+                    const data = encoder.encode(message);
+                    const hashBuffer = await crypto.subtle.digest(algorithm, data);
+                    
+                    // 将哈希值转换为十六进制字符串
+                    const hashArray = Array.from(new Uint8Array(hashBuffer));
+                    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                } else {
+                    // 使用CryptoJS库和js-sha3库
+                    switch (algorithm) {
+                        case 'MD5':
+                            const hash = CryptoJS.MD5(message);
+                            return hash.toString(CryptoJS.enc.Hex);
+                        case 'SHA3-256':
+                            // 使用专门的SHA3库
+                            return sha3_256(message);
+                        case 'SHA3-512':
+                            // 使用专门的SHA3库
+                            return sha3_512(message);
+                        case 'SM3':
+                            // 使用SM3库计算哈希值
+                            return sm3(message);
+                        default:
+                            return '不支持的算法';
+                    }
+                }
+            } catch (error) {
+                console.error('计算哈希值时出错:', error);
+                return '计算哈希值时出错';
+            }
+        }
+
+        // 更新哈希值的函数 (文本输入)
+        async function updateHash() {
+            const message = messageInput.value;
+            const algorithm = algorithmSelect.value;
+            
+            if (!message) {
+                if (!currentFile) {
+                    hashOutput.value = '';
+                }
+                return;
+            }
+
+            // 清除文件选择
+            fileInput.value = '';
+            currentFile = null;
+            fileInfo.textContent = '未选择文件';
+
+            hashOutput.value = '计算中...';
+            hashOutput.value = await calculateHash(message, algorithm);
+        }
+
+        // 更新哈希值的函数 (文件输入)
+        async function updateHashFromFile() {
+            if (!currentFile) {
+                return;
+            }
+
+            const algorithm = algorithmSelect.value;
+            hashOutput.value = '计算中...';
+            
+            try {
+                const fileHash = await calculateFileHash(currentFile, algorithm);
+                hashOutput.value = fileHash;
+            } catch (error) {
+                hashOutput.value = '计算哈希值时出错: ' + error.message;
+            }
+        }
+
+        // 添加事件监听器
+        messageInput.addEventListener('input', updateHash);
+        algorithmSelect.addEventListener('change', function() {
+            if (currentFile) {
+                updateHashFromFile();
+            } else if (messageInput.value) {
+                updateHash();
+            }
+        });
+        
+        // 初始计算
+        updateHash();
+    </script>
+</body>
+</html>
